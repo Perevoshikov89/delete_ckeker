@@ -3,6 +3,31 @@ import threading
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import os
+import sys
+
+# Храним дескрипторы DLL-каталогов, чтобы они не закрылись
+_DLL_DIR_HANDLES = []
+
+
+def setup_db2_dll_path():
+    if getattr(sys, "frozen", False):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    dll_paths = [
+        os.path.join(base_dir, "clidriver", "bin"),
+        os.path.join(base_dir, "bin"),
+    ]
+
+    for path in dll_paths:
+        if os.path.isdir(path):
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
+
+
+setup_db2_dll_path()
+
 import ibm_db
 
 
