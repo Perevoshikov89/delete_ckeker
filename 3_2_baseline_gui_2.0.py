@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
 import sys
+import html
 
 
 # ============================================================
@@ -107,6 +108,15 @@ class BaselineApp:
         self.after_baseline = None
 
         self.loader_info = None
+
+        # ====================================================
+        # HTML REPORT STATE
+        # ====================================================
+
+        self.report_data = None
+        self.log_entries = []
+        self.report_ready = False
+        self.report_file = None
 
         self.create_ui()
 
@@ -500,6 +510,22 @@ class BaselineApp:
             side="left"
         )
 
+        # ====================================================
+        # НОВАЯ КНОПКА HTML
+        # ====================================================
+
+        self.save_report_button = ttk.Button(
+            check_frame,
+            text="СОХРАНИТЬ HTML-ОТЧЁТ",
+            command=self.save_html_report,
+            state="disabled"
+        )
+
+        self.save_report_button.pack(
+            side="left",
+            padx=10
+        )
+
         self.clear_loader_button = ttk.Button(
             check_frame,
             text="Очистить сообщение loader",
@@ -507,8 +533,7 @@ class BaselineApp:
         )
 
         self.clear_loader_button.pack(
-            side="left",
-            padx=10
+            side="left"
         )
 
         # ----------------------------------------------------
@@ -673,11 +698,19 @@ class BaselineApp:
         text
     ):
 
-        def append():
+        timestamp = datetime.now().strftime(
+            "%H:%M:%S"
+        )
 
-            timestamp = datetime.now().strftime(
-                "%H:%M:%S"
-            )
+        text = str(text)
+
+        # Сохраняем запись для HTML-отчёта
+        self.log_entries.append({
+            "time": timestamp,
+            "text": text
+        })
+
+        def append():
 
             self.log.insert(
                 "end",
@@ -859,6 +892,18 @@ class BaselineApp:
         self.log.delete(
             "1.0",
             "end"
+        )
+
+        # Новый запуск baseline — старый журнал отчёта не нужен
+        self.log_entries = []
+
+        # Сбрасываем старый отчёт
+        self.report_data = None
+        self.report_ready = False
+        self.report_file = None
+
+        self.save_report_button.config(
+            state="disabled"
         )
 
         self.write_log(
@@ -1631,7 +1676,6 @@ class BaselineApp:
         )
 
     # ========================================================
-    # НОВОЕ:
     # Детализация UID + reported_dt
     # ========================================================
 
@@ -1704,9 +1748,10 @@ class BaselineApp:
             set(after_details.keys())
         )
 
-        if not dates:
+        details_result = []
 
-            return
+        if not dates:
+            return details_result
 
         for reported_dt in sorted(
             dates
@@ -1727,6 +1772,14 @@ class BaselineApp:
                 after_count
             )
 
+            details_result.append({
+                "uid": str(uid),
+                "reported_dt": reported_dt,
+                "before": before_count,
+                "after": after_count,
+                "deleted": deleted
+            })
+
             self.write_log(
                 f"    {uid:<12} | "
                 f"{reported_dt:<25} | "
@@ -1735,11 +1788,22 @@ class BaselineApp:
                 f"{deleted:>7}"
             )
 
+        return details_result
+
     # ========================================================
     # CHECK EVENT 3.2
     # ========================================================
 
     def check_event_3_2(self):
+
+        # Сбрасываем предыдущий HTML-отчёт.
+        self.report_ready = False
+        self.report_data = None
+        self.report_file = None
+
+        self.save_report_button.config(
+            state="disabled"
+        )
 
         try:
 
@@ -1888,10 +1952,38 @@ class BaselineApp:
             str(target_uid)
         )
 
+        # ----------------------------------------------------
+        # Новый журнал именно для итоговой проверки
+        # ----------------------------------------------------
+
         self.log.delete(
             "1.0",
             "end"
         )
+
+        self.log_entries = []
+
+        self.report_data = None
+        self.report_ready = False
+        self.report_file = None
+
+        self.save_report_button.config(
+            state="disabled"
+        )
+
+        # ----------------------------------------------------
+        # Структуры HTML отчёта
+        # ----------------------------------------------------
+
+        loader_db_report = []
+        target_report = []
+        target_detail_report = {}
+        control_report = []
+        unexpected_increase_report = []
+
+        # ====================================================
+        # HEADER
+        # ====================================================
 
         self.write_log(
             "══════════════════════════════════════════"
@@ -2017,6 +2109,15 @@ class BaselineApp:
                 else "FAIL"
             )
 
+            loader_db_report.append({
+                "table": table,
+                "before": before_total,
+                "loader": loader_count,
+                "after": after_total,
+                "deleted": deleted,
+                "passed": passed
+            })
+
             self.write_log(
                 f"{table:<30}"
                 f"{before_total:>7} "
@@ -2090,6 +2191,15 @@ class BaselineApp:
                 else "FAIL"
             )
 
+            target_report.append({
+                "table": table,
+                "before": before_uid,
+                "loader": loader_count,
+                "after": after_uid,
+                "deleted": deleted,
+                "passed": passed
+            })
+
             self.write_log(
                 f"{table:<30}"
                 f"{before_uid:>7} "
@@ -2148,12 +2258,14 @@ class BaselineApp:
                 f"{table}:"
             )
 
-            self.write_uid_details(
+            details = self.write_uid_details(
                 table,
                 target_uid,
                 before,
                 after
             )
+
+            target_detail_report[table] = details
 
         # ====================================================
         # CHECK 3
@@ -2180,6 +2292,7 @@ class BaselineApp:
             ):
 
                 uid_has_problem = False
+                control_problems = []
 
                 self.write_log("")
                 self.write_log(
@@ -2227,12 +2340,20 @@ class BaselineApp:
                             "BEFORE  AFTER  УДАЛЕНО"
                         )
 
-                        self.write_uid_details(
+                        details = self.write_uid_details(
                             table,
                             control_uid,
                             before,
                             after
                         )
+
+                        control_problems.append({
+                            "table": table,
+                            "before": before_uid,
+                            "after": after_uid,
+                            "deleted": deleted,
+                            "details": details
+                        })
 
                 if not uid_has_problem:
 
@@ -2240,6 +2361,12 @@ class BaselineApp:
                         "  PASS — изменений удаления "
                         "не обнаружено."
                     )
+
+                control_report.append({
+                    "uid": control_uid,
+                    "passed": not uid_has_problem,
+                    "problems": control_problems
+                })
 
         # ====================================================
         # CHECK 4
@@ -2262,7 +2389,7 @@ class BaselineApp:
 
             if after_total > before_total:
 
-                unexpected_increase.append({
+                item = {
                     "table": table,
                     "before": before_total,
                     "after": after_total,
@@ -2270,7 +2397,15 @@ class BaselineApp:
                         after_total -
                         before_total
                     )
-                })
+                }
+
+                unexpected_increase.append(
+                    item
+                )
+
+                unexpected_increase_report.append(
+                    item
+                )
 
         if unexpected_increase:
 
@@ -2337,6 +2472,48 @@ class BaselineApp:
         )
 
         # ====================================================
+        # Сохраняем структуру отчёта
+        # ====================================================
+
+        self.report_data = {
+            "generated_at": datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "fid": str(fid),
+            "target_uid": str(target_uid),
+            "start_datetime": (
+                str(start_datetime)
+                if start_datetime
+                else "не указан"
+            ),
+
+            "loader_total": loader_total,
+            "loader_deletions": dict(
+                deletions
+            ),
+
+            "loader_db": loader_db_report,
+            "target": target_report,
+            "target_detail": target_detail_report,
+            "control": control_report,
+            "unexpected_increase": (
+                unexpected_increase_report
+            ),
+
+            "overall_pass": overall_pass,
+            "target_pass": target_pass,
+            "control_pass": control_pass,
+            "final_pass": final_pass
+        }
+
+        # Отчёт доступен даже при FAIL
+        self.report_ready = True
+
+        self.save_report_button.config(
+            state="normal"
+        )
+
+        # ====================================================
         # MESSAGEBOX
         # ====================================================
 
@@ -2349,7 +2526,9 @@ class BaselineApp:
                 f"TARGET UID: {target_uid}\n\n"
                 "✓ Loader соответствует DB\n"
                 "✓ TARGET UID соответствует удалениям\n"
-                "✓ CONTROL UID не изменён"
+                "✓ CONTROL UID не изменён\n\n"
+                "HTML-отчёт можно сохранить кнопкой\n"
+                "«СОХРАНИТЬ HTML-ОТЧЁТ»."
             )
 
         else:
@@ -2359,7 +2538,990 @@ class BaselineApp:
                 "Обнаружено расхождение.\n\n"
                 f"FID: {fid}\n"
                 f"TARGET UID: {target_uid}\n\n"
-                "Подробности находятся в журнале."
+                "Подробности находятся в журнале.\n\n"
+                "HTML-отчёт можно сохранить кнопкой\n"
+                "«СОХРАНИТЬ HTML-ОТЧЁТ»."
+            )
+
+    # ========================================================
+    # HTML REPORT
+    # ========================================================
+
+    def generate_html_report(self):
+
+        if not self.report_data:
+            return ""
+
+        data = self.report_data
+
+        def esc(value):
+
+            if value is None:
+                return ""
+
+            return html.escape(
+                str(value)
+            )
+
+        def result_class(value):
+
+            return (
+                "pass"
+                if value
+                else "fail"
+            )
+
+        def result_text(value):
+
+            return (
+                "PASS"
+                if value
+                else "FAIL"
+            )
+
+        parts = []
+
+        # ====================================================
+        # HTML HEADER
+        # ====================================================
+
+        parts.append(
+            """<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>
+Event 3.2 Regression Report
+</title>
+
+<style>
+
+body {
+    font-family:
+        "Segoe UI",
+        Arial,
+        Helvetica,
+        sans-serif;
+
+    margin: 0;
+    padding: 30px;
+
+    background: #f3f5f7;
+    color: #222;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+h1 {
+    margin-bottom: 5px;
+}
+
+h2 {
+    margin-top: 35px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #555;
+}
+
+h3 {
+    margin-top: 25px;
+}
+
+.header {
+    background: white;
+    border: 1px solid #d5d9dd;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.meta {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.meta td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.meta td:first-child {
+    width: 230px;
+    font-weight: bold;
+}
+
+.result {
+    margin-top: 18px;
+    padding: 15px;
+    border-radius: 7px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.pass {
+    color: #176b32;
+    background: #e9f7ed;
+    border: 1px solid #a9d9b5;
+}
+
+.fail {
+    color: #a51d2d;
+    background: #fdecee;
+    border: 1px solid #e5aeb5;
+}
+
+.warn {
+    color: #795700;
+    background: #fff6d8;
+    border: 1px solid #e6cd7a;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    margin-top: 10px;
+}
+
+th {
+    background: #e8ebee;
+    font-weight: bold;
+}
+
+th,
+td {
+    border: 1px solid #cfd3d7;
+    padding: 7px 9px;
+    vertical-align: top;
+}
+
+.pass-row {
+    background: #f4fbf6;
+}
+
+.fail-row {
+    background: #fff1f2;
+}
+
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+pre {
+    background: #171717;
+    color: #eeeeee;
+    padding: 15px;
+    border-radius: 8px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.summary-table td:first-child {
+    font-weight: bold;
+}
+
+.footer {
+    margin-top: 35px;
+    color: #777;
+    font-size: 12px;
+    text-align: center;
+}
+
+@media print {
+
+    body {
+        background: white;
+        padding: 10px;
+    }
+
+    .header {
+        border: 1px solid #999;
+    }
+
+    h2 {
+        page-break-after: avoid;
+    }
+
+    table {
+        page-break-inside: auto;
+    }
+
+    tr {
+        page-break-inside: avoid;
+    }
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+"""
+        )
+
+        # ====================================================
+        # HEADER
+        # ====================================================
+
+        parts.append(
+            f"""
+<div class="header">
+
+<h1>
+EVENT 3.2 REGRESSION CHECK
+</h1>
+
+<table class="meta">
+
+<tr>
+<td>Дата формирования отчёта</td>
+<td>{esc(data["generated_at"])}</td>
+</tr>
+
+<tr>
+<td>FID</td>
+<td>{esc(data["fid"])}</td>
+</tr>
+
+<tr>
+<td>TARGET UID</td>
+<td>{esc(data["target_uid"])}</td>
+</tr>
+
+<tr>
+<td>START DATE</td>
+<td>{esc(data["start_datetime"])}</td>
+</tr>
+
+</table>
+
+<div class="result {result_class(data["final_pass"])}">
+
+FINAL RESULT:
+{result_text(data["final_pass"])}
+
+</div>
+
+</div>
+"""
+        )
+
+        # ====================================================
+        # LOADER EXPECTED
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+LOADER → EXPECTED DELETIONS
+</h2>
+
+<table>
+
+<tr>
+<th>TABLE</th>
+<th>EXPECTED DELETIONS</th>
+</tr>
+"""
+        )
+
+        for table, count in data[
+            "loader_deletions"
+        ].items():
+
+            parts.append(
+                f"""
+<tr>
+<td>{esc(table)}</td>
+<td>{esc(count)}</td>
+</tr>
+"""
+            )
+
+        parts.append(
+            f"""
+<tr>
+<th>TOTAL</th>
+<th>{esc(data["loader_total"])}</th>
+</tr>
+
+</table>
+"""
+        )
+
+        # ====================================================
+        # LOADER ↔ DB
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+LOADER ↔ DB
+</h2>
+
+<table>
+
+<tr>
+<th>TABLE</th>
+<th>BEFORE</th>
+<th>LOADER</th>
+<th>AFTER</th>
+<th>DELETED</th>
+<th>RESULT</th>
+</tr>
+"""
+        )
+
+        for row in data["loader_db"]:
+
+            row_class = (
+                "pass-row"
+                if row["passed"]
+                else "fail-row"
+            )
+
+            parts.append(
+                f"""
+<tr class="{row_class}">
+
+<td>{esc(row["table"])}</td>
+<td>{esc(row["before"])}</td>
+<td>{esc(row["loader"])}</td>
+<td>{esc(row["after"])}</td>
+<td>{esc(row["deleted"])}</td>
+
+<td>
+
+<span class="badge {result_class(row["passed"])}">
+
+{result_text(row["passed"])}
+
+</span>
+
+</td>
+
+</tr>
+"""
+            )
+
+        parts.append(
+            """
+</table>
+"""
+        )
+
+        # ====================================================
+        # TARGET UID
+        # ====================================================
+
+        parts.append(
+            f"""
+<h2>
+TARGET UID: {esc(data["target_uid"])}
+</h2>
+
+<table>
+
+<tr>
+<th>TABLE</th>
+<th>BEFORE</th>
+<th>LOADER</th>
+<th>AFTER</th>
+<th>DELETED</th>
+<th>RESULT</th>
+</tr>
+"""
+        )
+
+        for row in data["target"]:
+
+            row_class = (
+                "pass-row"
+                if row["passed"]
+                else "fail-row"
+            )
+
+            parts.append(
+                f"""
+<tr class="{row_class}">
+
+<td>{esc(row["table"])}</td>
+<td>{esc(row["before"])}</td>
+<td>{esc(row["loader"])}</td>
+<td>{esc(row["after"])}</td>
+<td>{esc(row["deleted"])}</td>
+
+<td>
+
+<span class="badge {result_class(row["passed"])}">
+
+{result_text(row["passed"])}
+
+</span>
+
+</td>
+
+</tr>
+"""
+            )
+
+        parts.append(
+            """
+</table>
+"""
+        )
+
+        # ====================================================
+        # TARGET UID DETAIL
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+TARGET UID DETAIL
+</h2>
+"""
+        )
+
+        if not data["target_detail"]:
+
+            parts.append(
+                """
+<p>
+Нет детальных записей для TARGET UID.
+</p>
+"""
+            )
+
+        else:
+
+            for table, details in data[
+                "target_detail"
+            ].items():
+
+                parts.append(
+                    f"""
+<h3>
+{esc(table)}
+</h3>
+
+<table>
+
+<tr>
+<th>UID</th>
+<th>REPORTED_DT</th>
+<th>BEFORE</th>
+<th>AFTER</th>
+<th>DELETED</th>
+</tr>
+"""
+                )
+
+                if not details:
+
+                    parts.append(
+                        """
+<tr>
+<td colspan="5">
+Нет записей.
+</td>
+</tr>
+"""
+                    )
+
+                for row in details:
+
+                    row_class = (
+                        "pass-row"
+                        if row["deleted"] >= 0
+                        else "fail-row"
+                    )
+
+                    parts.append(
+                        f"""
+<tr class="{row_class}">
+
+<td>{esc(row["uid"])}</td>
+<td>{esc(row["reported_dt"])}</td>
+<td>{esc(row["before"])}</td>
+<td>{esc(row["after"])}</td>
+<td>{esc(row["deleted"])}</td>
+
+</tr>
+"""
+                    )
+
+                parts.append(
+                    """
+</table>
+"""
+                )
+
+        # ====================================================
+        # CONTROL UID
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+CONTROL UID CHECK
+</h2>
+"""
+        )
+
+        if not data["control"]:
+
+            parts.append(
+                """
+<div class="result warn">
+Контрольных UID не найдено.
+</div>
+"""
+            )
+
+        else:
+
+            for control in data[
+                "control"
+            ]:
+
+                passed = control["passed"]
+
+                parts.append(
+                    f"""
+<div class="result {result_class(passed)}">
+
+CONTROL UID {esc(control["uid"])}
+—
+{result_text(passed)}
+
+</div>
+"""
+                )
+
+                problems = control[
+                    "problems"
+                ]
+
+                if problems:
+
+                    parts.append(
+                        """
+<table>
+
+<tr>
+<th>TABLE</th>
+<th>BEFORE</th>
+<th>AFTER</th>
+<th>DELETED</th>
+</tr>
+"""
+                    )
+
+                    for problem in problems:
+
+                        parts.append(
+                            f"""
+<tr class="fail-row">
+
+<td>{esc(problem["table"])}</td>
+<td>{esc(problem["before"])}</td>
+<td>{esc(problem["after"])}</td>
+<td>{esc(problem["deleted"])}</td>
+
+</tr>
+"""
+                        )
+
+                    parts.append(
+                        """
+</table>
+"""
+                    )
+
+                    # Детализация control UID
+                    for problem in problems:
+
+                        details = problem.get(
+                            "details",
+                            []
+                        )
+
+                        if not details:
+                            continue
+
+                        parts.append(
+                            f"""
+<h3>
+CONTROL UID {esc(control["uid"])}
+—
+{esc(problem["table"])}
+DETAIL
+</h3>
+
+<table>
+
+<tr>
+<th>UID</th>
+<th>REPORTED_DT</th>
+<th>BEFORE</th>
+<th>AFTER</th>
+<th>DELETED</th>
+</tr>
+"""
+                        )
+
+                        for detail in details:
+
+                            row_class = (
+                                "pass-row"
+                                if detail["deleted"] == 0
+                                else "fail-row"
+                            )
+
+                            parts.append(
+                                f"""
+<tr class="{row_class}">
+
+<td>{esc(detail["uid"])}</td>
+<td>{esc(detail["reported_dt"])}</td>
+<td>{esc(detail["before"])}</td>
+<td>{esc(detail["after"])}</td>
+<td>{esc(detail["deleted"])}</td>
+
+</tr>
+"""
+                            )
+
+                        parts.append(
+                            """
+</table>
+"""
+                        )
+
+                else:
+
+                    parts.append(
+                        """
+<p>
+Удалений контрольного UID не обнаружено.
+</p>
+"""
+                    )
+
+        # ====================================================
+        # UNEXPECTED INCREASE
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+UNEXPECTED INCREASE
+</h2>
+"""
+        )
+
+        if data[
+            "unexpected_increase"
+        ]:
+
+            parts.append(
+                """
+<table>
+
+<tr>
+<th>TABLE</th>
+<th>BEFORE</th>
+<th>AFTER</th>
+<th>INCREASE</th>
+</tr>
+"""
+            )
+
+            for row in data[
+                "unexpected_increase"
+            ]:
+
+                parts.append(
+                    f"""
+<tr class="fail-row">
+
+<td>{esc(row["table"])}</td>
+<td>{esc(row["before"])}</td>
+<td>{esc(row["after"])}</td>
+<td>{esc(row["increase"])}</td>
+
+</tr>
+"""
+                )
+
+            parts.append(
+                """
+</table>
+"""
+            )
+
+        else:
+
+            parts.append(
+                """
+<div class="result pass">
+
+Неожиданного увеличения количества
+записей не обнаружено.
+
+</div>
+"""
+            )
+
+        # ====================================================
+        # SUMMARY
+        # ====================================================
+
+        parts.append(
+            f"""
+<h2>
+CHECK SUMMARY
+</h2>
+
+<table class="summary-table">
+
+<tr>
+
+<td>
+LOADER ↔ DB
+</td>
+
+<td>
+
+<span class="badge {result_class(data["overall_pass"])}">
+
+{result_text(data["overall_pass"])}
+
+</span>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+TARGET UID
+</td>
+
+<td>
+
+<span class="badge {result_class(data["target_pass"])}">
+
+{result_text(data["target_pass"])}
+
+</span>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+CONTROL UID
+</td>
+
+<td>
+
+<span class="badge {result_class(data["control_pass"])}">
+
+{result_text(data["control_pass"])}
+
+</span>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+FINAL
+</td>
+
+<td>
+
+<span class="badge {result_class(data["final_pass"])}">
+
+{result_text(data["final_pass"])}
+
+</span>
+
+</td>
+
+</tr>
+
+</table>
+"""
+        )
+
+        # ====================================================
+        # FULL JOURNAL
+        # ====================================================
+
+        parts.append(
+            """
+<h2>
+FULL JOURNAL
+</h2>
+
+<pre>
+"""
+        )
+
+        for entry in self.log_entries:
+
+            parts.append(
+                f"[{esc(entry['time'])}] "
+                f"{esc(entry['text'])}\n"
+            )
+
+        parts.append(
+            """
+</pre>
+"""
+        )
+
+        # ====================================================
+        # FOOTER
+        # ====================================================
+
+        parts.append(
+            """
+<div class="footer">
+
+Event 3.2 Regression Checker<br>
+READ ONLY DB CHECK
+
+</div>
+
+</div>
+
+</body>
+
+</html>
+"""
+        )
+
+        return "".join(
+            parts
+        )
+
+    # ========================================================
+    # СОХРАНЕНИЕ HTML-ОТЧЁТА
+    # ========================================================
+
+    def save_html_report(self):
+
+        if (
+            not self.report_ready
+            or
+            not self.report_data
+        ):
+
+            messagebox.showwarning(
+                "HTML-отчёт",
+                "Сначала необходимо выполнить "
+                "окончательную проверку EVENT 3.2."
+            )
+
+            return
+
+        data = self.report_data
+
+        timestamp = datetime.now().strftime(
+            "%Y%m%d_%H%M%S"
+        )
+
+        default_name = (
+            "3_2_regression_report_"
+            f"{data['fid']}_"
+            f"{timestamp}.html"
+        )
+
+        filename = filedialog.asksaveasfilename(
+            title="Сохранить HTML-отчёт",
+            defaultextension=".html",
+            initialfile=default_name,
+            filetypes=[
+                (
+                    "HTML files",
+                    "*.html"
+                ),
+                (
+                    "All files",
+                    "*.*"
+                )
+            ]
+        )
+
+        if not filename:
+            return
+
+        try:
+
+            report_html = (
+                self.generate_html_report()
+            )
+
+            with open(
+                filename,
+                "w",
+                encoding="utf-8"
+            ) as file:
+
+                file.write(
+                    report_html
+                )
+
+            self.report_file = filename
+
+            self.write_log(
+                f"✓ HTML-отчёт сохранён: "
+                f"{filename}"
+            )
+
+            messagebox.showinfo(
+                "HTML-отчёт",
+                "HTML-отчёт успешно сохранён.\n\n"
+                f"{filename}"
+            )
+
+        except Exception as e:
+
+            self.write_log(
+                f"✗ Ошибка сохранения HTML-отчёта: "
+                f"{e}"
+            )
+
+            messagebox.showerror(
+                "Ошибка сохранения HTML-отчёта",
+                str(e)
             )
 
 
