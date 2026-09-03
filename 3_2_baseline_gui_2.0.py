@@ -12,7 +12,6 @@ import sys
 # DLL
 # ============================================================
 
-# Храним дескрипторы DLL-каталогов, чтобы они не закрылись
 _DLL_DIR_HANDLES = []
 
 
@@ -102,14 +101,11 @@ class BaselineApp:
             700
         )
 
-        # Текущий снятый baseline
         self.baseline = None
 
-        # BEFORE / AFTER
         self.before_baseline = None
         self.after_baseline = None
 
-        # Данные loader
         self.loader_info = None
 
         self.create_ui()
@@ -129,10 +125,6 @@ class BaselineApp:
             fill="both",
             expand=True
         )
-
-        # ----------------------------------------------------
-        # Заголовок
-        # ----------------------------------------------------
 
         title = ttk.Label(
             main,
@@ -424,9 +416,7 @@ class BaselineApp:
 
         loader_frame = ttk.LabelFrame(
             main,
-            text=(
-                "Сообщение loader для события 3.2"
-            ),
+            text="Сообщение loader для события 3.2",
             padding=8
         )
 
@@ -441,7 +431,7 @@ class BaselineApp:
             text=(
                 "Вставь блок строк Deleting ... for 3_2. "
                 "Если есть строка Correcting uid..., "
-                "FID/TARGET/startDateTime будут определены автоматически."
+                "FID/TARGET/startDateTime определятся автоматически."
             )
         )
 
@@ -1474,10 +1464,6 @@ class BaselineApp:
 
         deletions = {}
 
-        # ----------------------------------------------------
-        # Deleting N records in TABLE for 3_2
-        # ----------------------------------------------------
-
         deletion_pattern = re.compile(
             r"Deleting\s+(\d+)\s+records\s+in\s+"
             r"([A-Za-z0-9_]+)\s+for\s+3_2",
@@ -1505,10 +1491,6 @@ class BaselineApp:
                 "Не найдено ни одной строки:\n\n"
                 "Deleting N records in TABLE for 3_2"
             )
-
-        # ----------------------------------------------------
-        # Correcting uid in 3_2 mode
-        # ----------------------------------------------------
 
         fid = None
         target_uid = None
@@ -1649,16 +1631,117 @@ class BaselineApp:
         )
 
     # ========================================================
+    # НОВОЕ:
+    # Детализация UID + reported_dt
+    # ========================================================
+
+    def get_uid_details(
+        self,
+        baseline,
+        table,
+        uid
+    ):
+
+        result = {}
+
+        for row in self.table_rows(
+            baseline,
+            table
+        ):
+
+            if str(
+                row.get("acc_serial_num")
+            ) != str(uid):
+
+                continue
+
+            reported_dt = row.get(
+                "reported_dt"
+            )
+
+            key = (
+                str(reported_dt)
+                if reported_dt is not None
+                else "NULL"
+            )
+
+            result[key] = (
+                result.get(key, 0)
+                +
+                int(
+                    row.get(
+                        "count",
+                        0
+                    )
+                )
+            )
+
+        return result
+
+    def write_uid_details(
+        self,
+        table,
+        uid,
+        before,
+        after
+    ):
+
+        before_details = self.get_uid_details(
+            before,
+            table,
+            uid
+        )
+
+        after_details = self.get_uid_details(
+            after,
+            table,
+            uid
+        )
+
+        dates = (
+            set(before_details.keys())
+            |
+            set(after_details.keys())
+        )
+
+        if not dates:
+
+            return
+
+        for reported_dt in sorted(
+            dates
+        ):
+
+            before_count = before_details.get(
+                reported_dt,
+                0
+            )
+
+            after_count = after_details.get(
+                reported_dt,
+                0
+            )
+
+            deleted = (
+                before_count -
+                after_count
+            )
+
+            self.write_log(
+                f"    {uid:<12} | "
+                f"{reported_dt:<25} | "
+                f"{before_count:>6} | "
+                f"{after_count:>5} | "
+                f"{deleted:>7}"
+            )
+
+    # ========================================================
     # CHECK EVENT 3.2
     # ========================================================
 
     def check_event_3_2(self):
 
         try:
-
-            # ------------------------------------------------
-            # Проверяем наличие BEFORE / AFTER
-            # ------------------------------------------------
 
             if not self.before_baseline:
 
@@ -1671,10 +1754,6 @@ class BaselineApp:
                 raise ValueError(
                     "Не загружен AFTER baseline."
                 )
-
-            # ------------------------------------------------
-            # FID
-            # ------------------------------------------------
 
             before_fid = str(
                 self.before_baseline.get(
@@ -1699,10 +1778,6 @@ class BaselineApp:
                     f"AFTER  = {after_fid}"
                 )
 
-            # ------------------------------------------------
-            # Парсим loader
-            # ------------------------------------------------
-
             loader_text = self.loader_text.get(
                 "1.0",
                 "end"
@@ -1711,10 +1786,6 @@ class BaselineApp:
             parsed = self.parse_loader_message(
                 loader_text
             )
-
-            # ------------------------------------------------
-            # FID из loader или поля
-            # ------------------------------------------------
 
             fid = (
                 parsed.get("fid")
@@ -1736,10 +1807,6 @@ class BaselineApp:
                     f"Baseline    = {before_fid}"
                 )
 
-            # ------------------------------------------------
-            # TARGET UID
-            # ------------------------------------------------
-
             target_uid = (
                 parsed.get("target_uid")
                 or self.target_uid.get().strip()
@@ -1753,10 +1820,6 @@ class BaselineApp:
                     "Correcting uid in 3_2 mode: ...\n\n"
                     "или укажи TARGET UID / SN вручную."
                 )
-
-            # ------------------------------------------------
-            # Обновляем поля
-            # ------------------------------------------------
 
             self.fid.delete(
                 0,
@@ -1779,10 +1842,6 @@ class BaselineApp:
             )
 
             self.loader_info = parsed
-
-            # ------------------------------------------------
-            # Запускаем сравнение
-            # ------------------------------------------------
 
             self.run_comparison(
                 fid=fid,
@@ -1819,10 +1878,6 @@ class BaselineApp:
         before = self.before_baseline
         after = self.after_baseline
 
-        # ----------------------------------------------------
-        # Определяем контрольные UID
-        # ----------------------------------------------------
-
         control_uids = (
             self.all_uids(before)
             |
@@ -1833,18 +1888,10 @@ class BaselineApp:
             str(target_uid)
         )
 
-        # ----------------------------------------------------
-        # Очищаем журнал
-        # ----------------------------------------------------
-
         self.log.delete(
             "1.0",
             "end"
         )
-
-        # ----------------------------------------------------
-        # Заголовок
-        # ----------------------------------------------------
 
         self.write_log(
             "══════════════════════════════════════════"
@@ -1879,7 +1926,7 @@ class BaselineApp:
             )
 
         # ----------------------------------------------------
-        # Loader
+        # LOADER
         # ----------------------------------------------------
 
         self.write_log("")
@@ -1912,17 +1959,17 @@ class BaselineApp:
 
         # ====================================================
         # CHECK 1
-        # LOADER vs DB TOTAL DELTA
+        # LOADER ↔ DB
         # ====================================================
 
         self.write_log("")
         self.write_log(
-            "LOADER ↔ DB DELTA"
+            "LOADER ↔ DB"
         )
 
         self.write_log(
             "TABLE                         "
-            "BEFORE  LOADER  AFTER  ACTUAL  CHECK"
+            "BEFORE  LOADER  AFTER  УДАЛЕНО  CHECK"
         )
 
         self.write_log(
@@ -1950,13 +1997,13 @@ class BaselineApp:
                 )
             )
 
-            actual_delta = (
+            deleted = (
                 before_total -
                 after_total
             )
 
             passed = (
-                actual_delta ==
+                deleted ==
                 loader_count
             )
 
@@ -1975,7 +2022,7 @@ class BaselineApp:
                 f"{before_total:>7} "
                 f"{loader_count:>7} "
                 f"{after_total:>6} "
-                f"{actual_delta:>7}  "
+                f"{deleted:>8}  "
                 f"{status}"
             )
 
@@ -1991,7 +2038,7 @@ class BaselineApp:
 
         self.write_log(
             "TABLE                         "
-            "BEFORE  LOADER  AFTER  ACTUAL  CHECK"
+            "BEFORE  LOADER  AFTER  УДАЛЕНО  CHECK"
         )
 
         self.write_log(
@@ -2021,16 +2068,16 @@ class BaselineApp:
                 )
             )
 
-            actual_deleted = (
+            deleted = (
                 before_uid -
                 after_uid
             )
 
             passed = (
-                actual_deleted ==
+                deleted ==
                 loader_count
                 and
-                actual_deleted >= 0
+                deleted >= 0
             )
 
             if not passed:
@@ -2048,8 +2095,64 @@ class BaselineApp:
                 f"{before_uid:>7} "
                 f"{loader_count:>7} "
                 f"{after_uid:>6} "
-                f"{actual_deleted:>7}  "
+                f"{deleted:>8}  "
                 f"{status}"
+            )
+
+        # ====================================================
+        # CHECK 2.1
+        # TARGET UID DETAIL
+        # ====================================================
+
+        self.write_log("")
+        self.write_log(
+            "TARGET UID DETAIL: UID + reported_dt"
+        )
+
+        self.write_log(
+            "TABLE"
+        )
+
+        self.write_log(
+            "  UID          reported_dt               "
+            "BEFORE  AFTER  УДАЛЕНО"
+        )
+
+        self.write_log(
+            "------------------------------------------------"
+        )
+
+        for table in TABLES:
+
+            before_uid = self.total_for_uid(
+                before,
+                table,
+                target_uid
+            )
+
+            after_uid = self.total_for_uid(
+                after,
+                table,
+                target_uid
+            )
+
+            if (
+                before_uid == 0
+                and
+                after_uid == 0
+            ):
+
+                continue
+
+            self.write_log(
+                f"{table}:"
+            )
+
+            self.write_uid_details(
+                table,
+                target_uid,
+                before,
+                after
             )
 
         # ====================================================
@@ -2097,14 +2200,12 @@ class BaselineApp:
                         control_uid
                     )
 
-                    delta = (
+                    deleted = (
                         before_uid -
                         after_uid
                     )
 
-                    # Для контрольной сделки
-                    # event 3.2 ничего удалять не должен.
-                    if delta != 0:
+                    if deleted != 0:
 
                         uid_has_problem = True
                         control_pass = False
@@ -2113,7 +2214,24 @@ class BaselineApp:
                             f"  FAIL {table}: "
                             f"{before_uid} → "
                             f"{after_uid} "
-                            f"(удалено {delta})"
+                            f"(удалено {deleted})"
+                        )
+
+                        # Детализация проблемного UID
+                        self.write_log(
+                            "    Детализация:"
+                        )
+
+                        self.write_log(
+                            "    UID          reported_dt               "
+                            "BEFORE  AFTER  УДАЛЕНО"
+                        )
+
+                        self.write_uid_details(
+                            table,
+                            control_uid,
+                            before,
+                            after
                         )
 
                 if not uid_has_problem:
@@ -2125,7 +2243,7 @@ class BaselineApp:
 
         # ====================================================
         # CHECK 4
-        # Проверяем неожиданный рост количества
+        # Неожиданный рост
         # ====================================================
 
         unexpected_increase = []
@@ -2229,7 +2347,7 @@ class BaselineApp:
                 "Проверка события 3.2 пройдена.\n\n"
                 f"FID: {fid}\n"
                 f"TARGET UID: {target_uid}\n\n"
-                "✓ Loader соответствует DB delta\n"
+                "✓ Loader соответствует DB\n"
                 "✓ TARGET UID соответствует удалениям\n"
                 "✓ CONTROL UID не изменён"
             )
